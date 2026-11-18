@@ -94,6 +94,7 @@ class App:
             old_mqtt = (self.cfg["mqtt"], self.cfg["frigate"]["topic"])
             self.cfg = self.settings.get()
             self.engine.set_config(self.cfg)
+            self._maybe_seed(self.now())
         if self.ha:
             self.ha.set_watch(self.watched())
         if self.mqtt and (self.cfg["mqtt"], self.cfg["frigate"]["topic"]) != old_mqtt:
@@ -167,9 +168,14 @@ class App:
             return
         if key == "at":
             return
-        first = self.shadow.update_ha(self.ha_vals.get("vehicle"), self.ha_vals.get("source"), now)
-        # No saved engine latch yet: adopt the HA one once so the comparison is meaningful.
-        if first and not self.had_saved_latch and self.engine.latch.car is None and self.ha_vals.get("vehicle"):
+        self.shadow.update_ha(self.ha_vals.get("vehicle"), self.ha_vals.get("source"), now)
+        self._maybe_seed(now)
+
+    def _maybe_seed(self, now: float):
+        """Until the engine has made a decision of its own (nothing persisted), mirror the HA latch once it
+        maps to a configured car. Retried on every HA change and settings change, so setup order does not matter."""
+        if (self.cfg["shadow"]["enabled"] and self.shadow.ha_seen and self.engine.latch.car is None
+                and self.store.kv_get("latch") is None and self.ha_vals.get("vehicle")):
             self._seed_from_ha(now)
 
     def _seed_from_ha(self, now: float):

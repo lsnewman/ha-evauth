@@ -125,3 +125,31 @@ def test_notify_and_device_parsing():
             "identifiers": [["mobile_app", "x"]]}, {"id": "def", "name": "Hub", "identifiers": [["hue", "y"]]}]
     d = options.devices_from_registry(reg)
     assert d == [{"value": "abc", "label": "Ann's phone (Apple iPhone)"}]
+
+
+def test_shadow_seed_works_whatever_order_you_configure_things(tmp_path):
+    """Entities saved before any cars: the HA latch is adopted as soon as the car exists."""
+    from app import settings
+    app = App(str(tmp_path), dev=True)
+    app.settings.update_section("entities", {"ha_latch_vehicle": "input_select.v", "ha_latch_source": "input_select.s"})
+    app.reload()
+    app.on_state("input_select.v", {"state": "Alpha"})
+    app.on_state("input_select.s", {"state": "lpr"})
+    assert app.engine.latch.car is None                       # no cars yet: cannot map "Alpha"
+    app.settings.update_section("cars", [{"name": "Alpha"}])
+    app.reload()
+    assert (app.engine.latch.car, app.engine.latch.source) == ("alpha", "lpr")
+    app.tick()
+    assert app.shadow.status()["open_now"] is False
+
+
+def test_seed_does_not_mask_a_real_clear(tmp_path):
+    app = App(str(tmp_path), dev=True)
+    app.settings.replace(make_cfg(entities={"ha_latch_vehicle": "input_select.v", "ha_latch_source": "input_select.s"}))
+    app.reload()
+    app.on_state("input_select.v", {"state": "none"})
+    app.on_state("input_select.s", {"state": "none"})
+    app.engine.apply("lpr", "alpha", app.now())
+    app._record([app.engine.clear(app.now(), "occupancy", "clear.empty", "x")])
+    app.on_state("input_select.v", {"state": "Alpha"})       # HA still says Alpha: that is a disagreement
+    assert app.engine.latch.car is None
