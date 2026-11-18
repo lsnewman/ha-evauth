@@ -1,0 +1,8 @@
+{
+  "attributes": {
+    "gps_accuracy": 0,
+    "in_zones": []
+  },
+  "entity_id": "device_tracker.alpha_location",
+  "state": "not_home"
+}

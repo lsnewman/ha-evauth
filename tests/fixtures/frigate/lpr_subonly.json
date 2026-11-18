@@ -1,0 +1,39 @@
+{
+  "after": {
+    "camera": "test_cam",
+    "current_zones": [
+      "test_zone"
+    ],
+    "entered_zones": [
+      "test_zone"
+    ],
+    "id": "1700000000.123-abc",
+    "label": "car",
+    "recognized_license_plate": [
+      "ZZZ999",
+      0.9
+    ],
+    "stationary": false,
+    "sub_label": [
+      "Bravo",
+      0.9
+    ]
+  },
+  "before": {
+    "camera": "test_cam",
+    "current_zones": [
+      "test_zone"
+    ],
+    "entered_zones": [
+      "test_zone"
+    ],
+    "id": "1700000000.123-abc",
+    "label": "car",
+    "stationary": false,
+    "sub_label": [
+      "Bravo",
+      0.9
+    ]
+  },
+  "type": "update"
+}

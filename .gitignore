@@ -1,0 +1,40 @@
+# --- Private / sensitive: NEVER commit (public repo) ---
+private/
+data/
+options.json
+.env
+.env.*
+*.db
+*.sqlite
+*.sqlite3
+config.local.json
+*.private.*
+fixtures/real/
+tests/fixtures/real/
+secrets*
+*.pem
+*.key
+
+# --- OS / editor ---
+.DS_Store
+.idea/
+.vscode/
+.claude/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# --- Docs build ---
+/site
+.devdata/

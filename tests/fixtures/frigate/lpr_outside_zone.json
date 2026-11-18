@@ -1,0 +1,23 @@
+{
+  "after": {
+    "camera": "test_cam",
+    "current_zones": [],
+    "entered_zones": [],
+    "id": "1700000000.123-abc",
+    "label": "car",
+    "recognized_license_plate": [
+      "WBQ123",
+      0.9
+    ],
+    "stationary": false
+  },
+  "before": {
+    "camera": "test_cam",
+    "current_zones": [],
+    "entered_zones": [],
+    "id": "1700000000.123-abc",
+    "label": "car",
+    "stationary": false
+  },
+  "type": "update"
+}

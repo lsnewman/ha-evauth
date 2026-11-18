@@ -1,0 +1,10 @@
+{
+  "attributes": {
+    "gps_accuracy": 0,
+    "in_zones": [
+      "zone.test_carport"
+    ]
+  },
+  "entity_id": "device_tracker.alpha_location",
+  "state": "home"
+}

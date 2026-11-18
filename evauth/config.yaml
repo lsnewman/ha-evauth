@@ -1,0 +1,22 @@
+name: EVAuth (dev)
+version: "0.1.0b1"
+slug: evauth
+description: "Carport EV: who is charging. Latches the car from Frigate plate reads, GPS and scans, books energy per car. Shadow mode first."
+url: https://github.com/lsnewman/ha-evauth
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+init: false
+services:
+  - mqtt:want
+homeassistant_api: true
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:ev-station
+panel_title: EVAuth
+panel_admin: true   # settings can change who may charge, so the panel is admin-only
+# No options on purpose: every setting is edited in the panel and kept in /data/config.json.
+options: {}
+schema: {}

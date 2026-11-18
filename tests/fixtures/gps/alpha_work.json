@@ -1,0 +1,10 @@
+{
+  "attributes": {
+    "gps_accuracy": 0,
+    "in_zones": [
+      "zone.work"
+    ]
+  },
+  "entity_id": "device_tracker.alpha_location",
+  "state": "Work"
+}
