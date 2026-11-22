@@ -46,6 +46,7 @@ class App:
         self.had_saved_latch = saved is not None
         self.engine = Engine(self.cfg, Latch(**saved) if saved else Latch())
         self.shadow = Shadow(self.store, lambda: self.cfg)
+        self.shadow.engine = (self.engine.latch.car, self.engine.latch.source)   # restored latch, not "none"
         self.sessions = SessionManager(self.store, lambda: self.engine.latch, self.now)
         self.ha = None
         self.mqtt = None
@@ -198,7 +199,8 @@ class App:
     def _record(self, decisions):
         for d in decisions:
             self.store.add_event(d)
-            log.info("[%s] %s: %s", d.rule, d.action, d.reason)
+            # repeated "already latched" confirmations are routine; keep them out of the INFO log
+            log.log(logging.DEBUG if d.rule.endswith(".same") else logging.INFO, "[%s] %s: %s", d.rule, d.action, d.reason)
             self.shadow.note_engine(self.engine.latch, d, d.ts)
             if d.action in ("set", "clear"):
                 self.store.kv_set("latch", self.engine.latch.to_dict())

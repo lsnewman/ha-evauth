@@ -64,6 +64,10 @@ Each is open for review.
     zone-empty and GPS-left-home clears wait, and restart their timers when the plug-in ends. Shadow mode will
     show this as *car* disagreements whenever the old automations clear a plugged-in car; they are intended.
     Setting: `charger_holds_latch`.
+14. **New:** a latch that cannot be confirmed (first occupancy reading after a restart, or the sensor lost and
+    back) is not cleared by the 5 minute rule, because that was never a departure. It gets a settle time
+    (`restart_grace_s`, default 3 min, for Frigate to re-detect the car) and then the normal clear time. The old automation has the same blind spot, with no timer at all.
+15. **New:** a latch made while the zone reads empty starts a fresh clear clock.
 
 ## Assumptions to verify against real payloads
 

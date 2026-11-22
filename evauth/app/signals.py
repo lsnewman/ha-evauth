@@ -22,9 +22,11 @@ def charger_signal(state, ts: float) -> Signal | None:
 
 
 def occupancy_signal(state: str, ts: float) -> Signal | None:
-    """on/off become signals; unavailable/unknown are 'no change' (never trigger a clear)."""
+    """on/off are readings; unavailable/unknown mean the sensor cannot be judged (on=None)."""
     if state == "on":
         return Signal("occupancy", ts, {"on": True})
     if state == "off":
         return Signal("occupancy", ts, {"on": False})
+    if state in ("unavailable", "unknown"):
+        return Signal("occupancy", ts, {"on": None})
     return None

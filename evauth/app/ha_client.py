@@ -131,6 +131,8 @@ class HAClient:
                 raise RuntimeError("authentication refused")
             ws.send(json.dumps({"id": 1, "type": "subscribe_events", "event_type": "state_changed"}))
             ws.send(json.dumps({"id": 2, "type": "get_states"}))
+            if not self.status.startswith("connected"):
+                log.info("connected to Home Assistant")
             self.status = "connected"
             ws.settimeout(90)
             while not self._stop.is_set():

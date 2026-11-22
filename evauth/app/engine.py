@@ -32,6 +32,7 @@ class Engine:
         self.latch = latch or Latch()
         self.occupied: bool | None = None
         self.empty_since: float | None = None
+        self.empty_timeout: float = 300.0       # how long "empty" must last: normal after a real on->off, plus the restart grace when unconfirmed
         self.empty_checked = True
         self.trackers: dict[str, _Tracker] = {}
         self.charger_present = False            # a car is plugged in / charging (connector status)
@@ -94,6 +95,9 @@ class Engine:
         def do_set(rule, why):
             self.latch = Latch(car=car, source=source, tier=sp["tier"], set_at=ts,
                                session_id=session_id if session_id else cur.session_id)
+            if self.occupied is False:          # latched while the zone reads empty: the clear clock restarts
+                self.empty_since, self.empty_timeout = ts, self.policy["empty_clear_s"]
+                self.empty_checked = False
             return Decision(ts=ts, signal=sig, action="set", car=car, source=source, tier=sp["tier"],
                             rule=f"{source}.{rule}", reason=why, authorises=self.authorised(), detail=detail)
 
@@ -174,7 +178,7 @@ class Engine:
         was, self.charger_present = self.charger_present, bool(sig.data.get("present"))
         if was and not self.charger_present:
             # Plug-in ended: give the car a fresh grace period before any clear that was being held.
-            if self.occupied is False and self.empty_since is not None:
+            if self.occupied is not True and self.empty_since is not None:
                 self.empty_since, self.empty_checked = sig.ts, False
             for t in self.trackers.values():
                 if t.away_since is not None and not t.away_fired:
@@ -186,19 +190,32 @@ class Engine:
         return []
 
     def _on_occupancy(self, sig: Signal) -> list[Decision]:
-        on = bool(sig.data.get("on"))
+        on = sig.data.get("on")
         prev = self.occupied
-        self.occupied = on
         out: list[Decision] = []
+        if on is None:
+            # Sensor lost (HA or Frigate restarting): presence cannot be judged. Like the old automation, a
+            # pending clear is cancelled; an unconfirmed latch gets the restart grace on top of the normal clear time.
+            self.occupied = None
+            self.empty_since, self.empty_checked = None, True
+            if self.latch.car is not None:
+                self.empty_since, self.empty_timeout = sig.ts, self.policy["restart_grace_s"] + self.policy["empty_clear_s"]
+                self.empty_checked = False
+            return out
+        self.occupied = bool(on)
         if on:
             self.empty_since = None
             if prev is False:                       # off -> on is a GPS arrival trigger
                 for car in self.cars:
                     out += self._gps_arrival(car["id"], sig.ts, "occupancy")
-        else:
-            if prev is not False:
-                self.empty_since = sig.ts
-                self.empty_checked = False
+        elif prev is True:                          # a real on -> off reading
+            self.empty_since, self.empty_timeout = sig.ts, self.policy["empty_clear_s"]
+            self.empty_checked = False
+        elif prev is None and self.latch.car is not None and (self.empty_since is None or self.empty_checked):
+            # First reading after a restart (or after the sensor was lost) is not a departure; the old
+            # automation never saw an on -> off here either. Keep the latch, but only for so long.
+            self.empty_since, self.empty_timeout = sig.ts, self.policy["restart_grace_s"] + self.policy["empty_clear_s"]
+            self.empty_checked = False
         return out
 
     def _on_gps(self, sig: Signal) -> list[Decision]:
@@ -235,8 +252,8 @@ class Engine:
         out: list[Decision] = []
         p = self.policy
         # zone empty long enough
-        if self.occupied is False and self.empty_since is not None and not self.empty_checked \
-                and now - self.empty_since >= p["empty_clear_s"]:
+        if self.occupied is not True and self.empty_since is not None and not self.empty_checked \
+                and now - self.empty_since >= self.empty_timeout:
             if self._holds():
                 if not self._held_empty:
                     self._held_empty = True
@@ -277,15 +294,15 @@ class Engine:
                 if state in UNAVAILABLE or (t and t.in_zone):
                     why = "tracker state unknown" if state in UNAVAILABLE else "tracker still in the zone"
                     return [self._dec("occupancy", now, "keep", "clear.empty_protected",
-                                      f"zone empty {self.policy['empty_clear_s']} s but latch kept: {why}")]
+                                      f"zone empty {int(self.empty_timeout)} s but latch kept: {why}")]
         return [self.clear(now, "occupancy", "clear.empty",
-                           f"zone empty for {self.policy['empty_clear_s']} s; latch cleared")]
+                           f"zone empty for {int(self.empty_timeout)} s; latch cleared")]
 
     def next_deadline(self) -> float | None:
         """Earliest time `tick` could act; lets the caller sleep precisely."""
         ds = []
-        if self.occupied is False and self.empty_since is not None and not self.empty_checked:
-            ds.append(self.empty_since + self.policy["empty_clear_s"])
+        if self.occupied is not True and self.empty_since is not None and not self.empty_checked:
+            ds.append(self.empty_since + self.empty_timeout)
         for t in self.trackers.values():
             if t.away_since is not None and not t.away_fired:
                 ds.append(t.away_since + self.policy["gps_leave_clear_s"])

@@ -1,5 +1,5 @@
 name: EVAuth (dev)
-version: "0.1.0b3"
+version: "0.1.0b4"
 slug: evauth
 description: "Carport EV: who is charging. Latches the car from Frigate plate reads, GPS and scans, books energy per car. Shadow mode first."
 url: https://github.com/lsnewman/ha-evauth

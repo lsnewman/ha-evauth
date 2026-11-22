@@ -61,6 +61,7 @@ POLICY_SPEC = {
     "gps_leave_clear_s": (int, 1, 86400, 120),    # tracker away from home this long -> clear
     "default_timeout_s": (int, 5, 600, 90),       # picker unanswered -> default car (phase 4)
     "no_plugin_s": (int, 60, 7200, 600),          # no plug-in this long -> Availability off (phase 4)
+    "restart_grace_s": (int, 0, 3600, 180),       # after a restart / lost sensor, ignore "empty" this long (Frigate re-detects), then the normal clear time applies
     "shadow_settle_s": (int, 0, 120, 5),          # wait before comparing with the HA latch
     "watchdog_timeout_s": (int, 30, 3600, 120),   # heartbeat silence before HA turns Availability off
     "charger_holds_latch": (bool, 0, 1, True),    # a car plugged in or charging keeps its latch
