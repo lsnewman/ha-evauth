@@ -63,6 +63,7 @@ POLICY_SPEC = {
     "no_plugin_s": (int, 60, 7200, 600),          # no plug-in this long -> Availability off (phase 4)
     "shadow_settle_s": (int, 0, 120, 5),          # wait before comparing with the HA latch
     "watchdog_timeout_s": (int, 30, 3600, 120),   # heartbeat silence before HA turns Availability off
+    "charger_holds_latch": (bool, 0, 1, True),    # a car plugged in or charging keeps its latch
     "upgrade_same_car": (bool, 0, 1, True),       # a confident source confirming the latched car upgrades its source
 }
 

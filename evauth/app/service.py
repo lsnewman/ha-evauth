@@ -18,7 +18,7 @@ from .model import Latch, Signal
 from .sessions import SessionManager
 from .settings import SettingsStore
 from .shadow import Shadow
-from .signals import gps_signal, occupancy_signal
+from .signals import charger_signal, gps_signal, occupancy_signal
 from .store import Store
 
 log = logging.getLogger("evauth")
@@ -154,6 +154,9 @@ class App:
                 self._ha_latch(entity_id, state, now)
             if entity_id == e["charger_status"]:
                 self.sessions.on_status(state)
+                sig = charger_signal(state, now)
+                if sig:
+                    self._handle(sig)
             if entity_id == e["charger_energy"]:
                 try:
                     self.sessions.on_energy(float(state))

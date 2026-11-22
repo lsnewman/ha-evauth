@@ -98,12 +98,20 @@ class Api:
 
     def create_session(self, body):
         self._car_ok(body.get("car_id"))
-        now = self.app.now()
+        start, end = _ts(body.get("start")), _ts(body.get("end"))
+        if start is None or end is None:
+            raise ApiError(400, "a session added by hand needs a start and an end time")
+        if end <= start:
+            raise ApiError(400, "the end time must be after the start time")
         kwh = body.get("kwh")
-        sid = self.app.store.create_session(_ts(body.get("start"), now), body.get("car_id") or None, "manual",
-                                            "manual", note=str(body.get("note", "")),
-                                            kwh=float(kwh) if kwh not in (None, "") else None,
-                                            end=_ts(body.get("end")))
+        try:
+            kwh = float(kwh) if kwh not in (None, "") else None
+        except (TypeError, ValueError):
+            raise ApiError(400, "kWh must be a number") from None
+        if kwh is not None and not 0 <= kwh <= 1000:
+            raise ApiError(400, "kWh must be between 0 and 1000")
+        sid = self.app.store.create_session(start, body.get("car_id") or None, "manual", "manual",
+                                            note=str(body.get("note", "")), kwh=kwh, end=end)
         return {"id": sid}
 
     def patch_session(self, sid, body):
@@ -117,8 +125,13 @@ class Api:
             fields["kwh"] = float(body["kwh"]) if body["kwh"] not in (None, "") else None
         if "note" in body and "car_id" not in body:
             fields["note"] = str(body["note"])
-        if "end" in body:
-            fields["end"] = _ts(body["end"])
+        for k in ("start", "end"):
+            if k in body:
+                fields[k] = _ts(body[k])
+        cur = self.app.store.get_session(sid)
+        s2, e2 = fields.get("start", cur["start"]), fields.get("end", cur["end"])
+        if s2 is not None and e2 is not None and e2 <= s2:
+            raise ApiError(400, "the end time must be after the start time")
         if fields:
             self.app.store.update_session(sid, **fields)
         return self.app.store.get_session(sid)

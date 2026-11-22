@@ -97,7 +97,7 @@ class Store:
         return self._q('SELECT * FROM sessions WHERE "end" IS NULL ORDER BY start DESC LIMIT 1', one=True)
 
     def update_session(self, sid: str, **fields):
-        allowed = {"end", "car_id", "attribution_source", "kwh", "note", "charger_tx"}
+        allowed = {"start", "end", "car_id", "attribution_source", "kwh", "note", "charger_tx"}
         bad = set(fields) - allowed
         if bad:
             raise ValueError(f"cannot update {sorted(bad)}")

@@ -34,6 +34,9 @@ class Engine:
         self.empty_since: float | None = None
         self.empty_checked = True
         self.trackers: dict[str, _Tracker] = {}
+        self.charger_present = False            # a car is plugged in / charging (connector status)
+        self._held_empty = False                # hold already logged, so the log is not spammed every tick
+        self._held_gps: set[str] = set()
 
     # ------------------------------------------------------------ helpers
     @property
@@ -52,12 +55,16 @@ class Engine:
         self.cfg = cfg
 
     def snapshot(self) -> dict:
-        return {"latch": self.latch.to_dict(), "occupied": self.occupied,
+        return {"latch": self.latch.to_dict(), "occupied": self.occupied, "charger_present": self.charger_present,
                 "authorised": self.authorised(),
                 "trackers": {k: {"state": t.state, "in_zone": t.in_zone} for k, t in self.trackers.items()}}
 
     def authorised(self) -> bool:
         return authorises(self.latch, self.sources)
+
+    def _holds(self) -> bool:
+        """A car that is plugged in or charging is certainly there: it keeps its latch."""
+        return bool(self.policy.get("charger_holds_latch") and self.charger_present and self.latch.car is not None)
 
     def _tracker(self, car_id: str) -> _Tracker:
         return self.trackers.setdefault(car_id, _Tracker())
@@ -163,6 +170,21 @@ class Engine:
                               f"classifier: class {d.get('name')!r} is not a configured car")]
         return [self.apply("classifier", car, sig.ts, "classifier", detail={"score": d.get("score")})]
 
+    def _on_charger(self, sig: Signal) -> list[Decision]:
+        was, self.charger_present = self.charger_present, bool(sig.data.get("present"))
+        if was and not self.charger_present:
+            # Plug-in ended: give the car a fresh grace period before any clear that was being held.
+            if self.occupied is False and self.empty_since is not None:
+                self.empty_since, self.empty_checked = sig.ts, False
+            for t in self.trackers.values():
+                if t.away_since is not None and not t.away_fired:
+                    t.away_since = sig.ts
+            self._held_empty = False
+            self._held_gps.clear()
+            return [self._dec("charger", sig.ts, "keep", "charger.released",
+                              "charger no longer plugged in; clear timers restarted")]
+        return []
+
     def _on_occupancy(self, sig: Signal) -> list[Decision]:
         on = bool(sig.data.get("on"))
         prev = self.occupied
@@ -215,11 +237,24 @@ class Engine:
         # zone empty long enough
         if self.occupied is False and self.empty_since is not None and not self.empty_checked \
                 and now - self.empty_since >= p["empty_clear_s"]:
-            self.empty_checked = True
-            out += self._clear_when_empty(now)
+            if self._holds():
+                if not self._held_empty:
+                    self._held_empty = True
+                    out.append(self._dec("occupancy", now, "keep", "clear.empty_held_charging",
+                                         "zone reads empty but the car is plugged in or charging; latch kept"))
+            else:
+                self.empty_checked = True
+                self._held_empty = False
+                out += self._clear_when_empty(now)
         # tracker away from home long enough
         for car_id, t in self.trackers.items():
             if t.away_since is not None and not t.away_fired and now - t.away_since >= p["gps_leave_clear_s"]:
+                if self.latch.car == car_id and self._holds():
+                    if car_id not in self._held_gps:
+                        self._held_gps.add(car_id)
+                        out.append(self._dec("gps", now, "keep", "clear.gps_held_charging",
+                                             f"{self._label(car_id)} reads away from home but is plugged in or charging; latch kept"))
+                    continue
                 t.away_fired = True
                 t.away_since = None
                 if self.latch.car == car_id:

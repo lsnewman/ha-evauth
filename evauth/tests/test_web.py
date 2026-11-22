@@ -153,3 +153,16 @@ def test_seed_does_not_mask_a_real_clear(tmp_path):
     app._record([app.engine.clear(app.now(), "occupancy", "clear.empty", "x")])
     app.on_state("input_select.v", {"state": "Alpha"})       # HA still says Alpha: that is a disagreement
     assert app.engine.latch.car is None
+
+
+def test_manual_session_needs_start_and_end_and_can_be_backdated(served):
+    app, req = served
+    assert req("POST", "/api/sessions", {"car_id": "alpha", "kwh": 5})[0] == 400
+    assert req("POST", "/api/sessions", {"car_id": "alpha", "start": 200, "end": 100})[0] == 400
+    assert req("POST", "/api/sessions", {"car_id": "alpha", "start": 100, "end": 200, "kwh": "x"})[0] == 400
+    code, r = req("POST", "/api/sessions", {"car_id": "alpha", "start": 1763682360, "end": 1763709240, "kwh": 51.3})
+    assert code == 200
+    code, s = req("PATCH", f"/api/sessions/{r['id']}", {"end": 1763709999})
+    assert code == 200 and s["end"] == 1763709999
+    assert req("PATCH", f"/api/sessions/{r['id']}", {"start": 1763710000})[0] == 400
+    assert req("GET", "/api/sessions")[1]["open"] is None          # a manual session never blocks the charger's

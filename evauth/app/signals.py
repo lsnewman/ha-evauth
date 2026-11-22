@@ -10,6 +10,17 @@ def gps_signal(car_id: str, state_obj: dict, zone_entity: str, ts: float) -> Sig
                               "in_zone": bool(zone_entity) and zone_entity in (attrs.get("in_zones") or [])})
 
 
+# Charger connector states in which a car is certainly there: plugged in, charging or just finished.
+PRESENT_STATES = ("Preparing", "Charging", "SuspendedEV", "SuspendedEVSE", "Finishing")
+
+
+def charger_signal(state, ts: float) -> Signal | None:
+    """Connector status -> 'a car is plugged in'. unavailable/unknown are no change."""
+    if state in (None, "", "unavailable", "unknown"):
+        return None
+    return Signal("charger", ts, {"present": state in PRESENT_STATES, "status": state})
+
+
 def occupancy_signal(state: str, ts: float) -> Signal | None:
     """on/off become signals; unavailable/unknown are 'no change' (never trigger a clear)."""
     if state == "on":

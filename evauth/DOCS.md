@@ -8,7 +8,8 @@ There is nothing to configure on the Configuration tab. Open the **EVAuth** pane
 
 ## First run
 
-1. **Sources:** the Frigate camera, zone, and label; the zone occupancy sensor; the helpers of
+1. **Sources:** (set the charger status to the *connector* status sensor, not the charger-level one)
+    the Frigate camera, zone, and label; the zone occupancy sensor; the helpers of
    your existing latch (for comparison); optionally the charger status and session-energy sensors.
 2. **Cars:** name, plate patterns, Frigate class, GPS tracker, opening kWh.
    Patterns ignore punctuation and case: `*` any run of characters, `?` one character, `[QDO0]` one of a set.

@@ -36,6 +36,10 @@ const $=s=>document.querySelector(s);
 const h=(t,a={},...k)=>{const e=document.createElement(t);for(const[x,v]of Object.entries(a)){if(x==="on")for(const[ev,f]of Object.entries(v))e.addEventListener(ev,f);else if(x==="class")e.className=v;else if(v===true)e.setAttribute(x,"");else if(v!==false&&v!=null)e.setAttribute(x,v)}for(const c of k.flat())if(c!=null&&c!==false)e.append(c.nodeType?c:document.createTextNode(c));return e};
 async function api(method,path,body){const r=await fetch("api/"+path,{method,headers:{"Content-Type":"application/json"},body:body===undefined?undefined:JSON.stringify(body)});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.statusText);return j}
 const fmt=t=>t?new Date(t*1000).toLocaleString():"";
+const pad=n=>String(n).padStart(2,"0");
+const toLocal=t=>{if(!t)return"";const d=new Date(t*1000);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`};
+const fromLocal=v=>v?new Date(v).getTime()/1000:null;   // the browser's own time zone
+const DT=(v,on)=>h("input",{type:"datetime-local",value:toLocal(v),on:{change:e=>on(fromLocal(e.target.value))}});
 const carName=id=>id==null?"none":id==="unknown"?"Unknown":(CFG.cars.find(c=>c.id===id)||{name:id}).name;
 function flash(m,e){MSG=m;ERR=e;render()}
 async function save(section,value){try{CFG=await api("PATCH","settings/"+section,section==="cars"||section==="users"?{value}:value);DRAFT={};flash("Saved.")}catch(e){flash(null,e.message)}}
@@ -62,7 +66,7 @@ V.status=()=>{const e=S.engine,l=e.latch,sh=S.shadow;
   h("div",{class:"big"},carName(l.car)),h("div",{class:"mut"},l.car?`source ${l.source} · ${l.tier} · set ${fmt(l.set_at)}`:"no car latched"),
   h("div",{},e.authorised?h("span",{class:"pill ok"},"would authorise charging"):h("span",{class:"pill warn"},"would not authorise"))),
   h("div",{class:"card grid"},
-   h("div",{},h("h2",{},"Zone"),e.occupied==null?"no reading yet":e.occupied?"occupied":"empty"),
+   h("div",{},h("h2",{},"Zone"),e.occupied==null?"no reading yet":e.occupied?"occupied":"empty",h("div",{class:"small mut"},e.charger_present?"Charger: car plugged in (holds the latch)":"Charger: nothing plugged in")),
    h("div",{},h("h2",{},"Home Assistant"),S.ha),h("div",{},h("h2",{},"MQTT / Frigate"),S.mqtt),
    h("div",{},h("h2",{},"Mode"),S.mode,h("div",{class:"small mut"},"Nothing is written to Home Assistant or the charger."))),
   h("div",{class:"card"},h("h2",{},"Shadow comparison"),
@@ -102,20 +106,20 @@ V.tiers=()=>{const s=JSON.parse(JSON.stringify(CFG.sources)),p={...CFG.policy},c
  return[h("div",{class:"card scroll"},h("h2",{},"Sources"),h("p",{class:"mut small"},"Defaults reproduce today's behaviour. An Unknown read can only ever fill an empty latch, and the classifier can never authorise; neither is configurable."),
   h("table",{},h("thead",{},h("tr",{},h("th",{},"Source"),h("th",{},"Tier"),h("th",{},"Min score"),cols.map(([,l])=>h("th",{},l)))),h("tbody",{},rows)),
   h("button",{style:"margin-top:8px",on:{click:()=>save("sources",s)}},"Save sources")),
- h("div",{class:"card"},h("h2",{},"Timings"),h("div",{class:"grid"},tim.map(([k,l])=>F(l,N(p[k],v=>p[k]=v,"1"))),C(p.upgrade_same_car,v=>p.upgrade_same_car=v,"A confident source confirming the latched car upgrades its source")),h("button",{style:"margin-top:8px",on:{click:()=>save("policy",p)}},"Save timings")),
+ h("div",{class:"card"},h("h2",{},"Timings"),h("div",{class:"grid"},tim.map(([k,l])=>F(l,N(p[k],v=>p[k]=v,"1"))),C(p.charger_holds_latch,v=>p.charger_holds_latch=v,"A car plugged in or charging keeps its latch (zone-empty and GPS clears wait)"),C(p.upgrade_same_car,v=>p.upgrade_same_car=v,"A confident source confirming the latched car upgrades its source")),h("button",{style:"margin-top:8px",on:{click:()=>save("policy",p)}},"Save timings")),
  h("div",{class:"card"},h("h2",{},"Indicator colours"),h("div",{class:"grid"},Object.keys(c).map(k=>F(k.replace("_"," "),SEL(c[k],["off","red","amber","green","blue","white"].map(x=>[x,x]),v=>c[k]=v)))),h("button",{style:"margin-top:8px",on:{click:()=>save("colours",c)}},"Save colours"))]};
 
 V.sessions=async()=>{const d=await api("GET","sessions");
- const nf={car_id:CFG.cars[0]?.id||"",kwh:"",note:""};
+ const nf=DRAFT.nf||(DRAFT.nf={car_id:CFG.cars[0]?.id||"",kwh:"",note:"",start:null,end:null});
  return[h("div",{class:"card pick"},h("h2",{},"Which car? (picker)"),h("div",{class:"mut small"},d.open?`Open session since ${fmt(d.open.start)}`:"Allocates the latest session. Does not touch the charger."),
    CFG.cars.map(c=>h("button",{on:{click:async()=>{try{await api("POST","pick",{car_id:c.id});flash("Allocated to "+c.name)}catch(e){flash(null,e.message)}}}},c.name))),
   h("div",{class:"card scroll"},h("h2",{},"Ledger (kWh)"),h("table",{},h("thead",{},h("tr",{},["Car","Opening","Sessions","Total"].map(x=>h("th",{},x)))),h("tbody",{},d.ledger.map(r=>h("tr",{},h("td",{},r.name),h("td",{},r.opening_kwh),h("td",{},r.session_kwh),h("td",{},h("b",{},r.total_kwh))))))),
-  h("div",{class:"card scroll"},h("h2",{},"Sessions"),h("table",{},h("thead",{},h("tr",{},["Start","End","kWh","Car","Source","Note",""].map(x=>h("th",{},x)))),h("tbody",{},d.sessions.map(s=>h("tr",{},h("td",{},fmt(s.start)),h("td",{},s.end?fmt(s.end):h("span",{class:"pill warn"},"open")),
+  h("div",{class:"card scroll"},h("h2",{},"Sessions"),h("table",{},h("thead",{},h("tr",{},["Start","End","kWh","Car","Source","Note",""].map(x=>h("th",{},x)))),h("tbody",{},d.sessions.map(s=>h("tr",{},h("td",{},DT(s.start,async v=>{try{await api("PATCH","sessions/"+s.id,{start:v});flash("Saved.")}catch(x){flash(null,x.message)}})),h("td",{},s.end?DT(s.end,async v=>{try{await api("PATCH","sessions/"+s.id,{end:v});flash("Saved.")}catch(x){flash(null,x.message)}}):h("span",{class:"pill warn"},"open")),
     h("td",{},h("input",{type:"number",step:"any",value:s.kwh??"",style:"width:90px",on:{change:async e=>{try{await api("PATCH","sessions/"+s.id,{kwh:e.target.value});flash("Saved.")}catch(x){flash(null,x.message)}}}})),
     h("td",{},SEL(s.car_id||"",[["","(none)"],...carOpts(),["unknown","Unknown"]],async v=>{try{await api("PATCH","sessions/"+s.id,{car_id:v});flash("Reallocated; both ledgers updated.")}catch(x){flash(null,x.message)}})),
     h("td",{class:"small"},s.attribution_source||""),h("td",{class:"small"},s.note||""),h("td",{},h("button",{class:"del",on:{click:async()=>{if(confirm("Delete this session?")){await api("DELETE","sessions/"+s.id);render()}}}},"✕")))))),
-  h("h3",{},"Add a session by hand"),h("div",{class:"grid"},F("Car",SEL(nf.car_id,carOpts(),v=>nf.car_id=v)),F("kWh",N(nf.kwh,v=>nf.kwh=v)),F("Note",T(nf.note,v=>nf.note=v))),
-  h("button",{style:"margin-top:8px",on:{click:async()=>{try{await api("POST","sessions",nf);flash("Added.")}catch(e){flash(null,e.message)}}}},"Add"))]};
+  h("h3",{},"Add a session by hand"),h("div",{class:"grid"},F("Car",SEL(nf.car_id,carOpts(),v=>nf.car_id=v)),F("Start",DT(nf.start,v=>nf.start=v)),F("End",DT(nf.end,v=>nf.end=v)),F("kWh",N(nf.kwh,v=>nf.kwh=v)),F("Note",T(nf.note,v=>nf.note=v))),
+  h("button",{style:"margin-top:8px",on:{click:async()=>{try{await api("POST","sessions",nf);DRAFT={};flash("Added.")}catch(e){flash(null,e.message)}}}},"Add"))]};
 
 V.shadow=async()=>{const d=await api("GET","disagreements");
  return[h("div",{class:"card"},h("h2",{},"Disagreements with the HA latch"),h("p",{class:"mut small"},"Each row is a period where the app's latch differed from the HA helpers' latch. Mark each as explained or intended once understood; cut-over waits until none are open."),

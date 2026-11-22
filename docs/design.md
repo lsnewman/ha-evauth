@@ -58,6 +58,12 @@ Each is open for review.
     This will show as a *source* disagreement in shadow mode.
 11. A repeated read of the same car by a source that refreshes (LPR) refreshes the latch time, as before.
 12. On first start the engine adopts the HA latch once, so shadow comparison starts from the same state.
+13. **New:** a car plugged in or charging keeps its latch. The old automations clear on an empty zone alone, which
+    a flaky detection can trigger while a car is charging. The connector states Preparing, Charging, SuspendedEV,
+    SuspendedEVSE and Finishing count as "plugged in" (a car that is plugged in is certainly there). The
+    zone-empty and GPS-left-home clears wait, and restart their timers when the plug-in ends. Shadow mode will
+    show this as *car* disagreements whenever the old automations clear a plugged-in car; they are intended.
+    Setting: `charger_holds_latch`.
 
 ## Assumptions to verify against real payloads
 
