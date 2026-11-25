@@ -7,9 +7,9 @@ logs every decision.
 It combines Frigate licence-plate reads, Frigate's object classifier, a GPS device tracker,
 a zone occupancy sensor and a tag scan, and books charging energy **per car**.
 
-> **Status: early, observe-only.** Phases 1 and 2 are built: sessions, the panel, and the
-> latching engine running in **shadow mode** beside your existing automations. It reads;
-> it never writes to Home Assistant or touches the charger. See [docs/design.md](docs/design.md).
+> **Status: early.** Sessions, the panel, the latching engine in **shadow mode** beside your existing
+> automations, and charging control (scan flow and charger Availability) are built. Charging control is
+> **off** until you enable it; until then the app touches nothing. See [docs/design.md](docs/design.md).
 
 ## What it does today
 
@@ -17,6 +17,8 @@ a zone occupancy sensor and a tag scan, and books charging energy **per car**.
   rules, with a configurable policy per source (tier, who may overwrite whom, staleness).
 - **Shadow mode:** compares its latch with your existing HA latch and records every
   disagreement for you to review.
+- **Charging control:** an NFC scan, car picker and timeouts, switching charger Availability, with a dry-run
+  mode and a Home Assistant watchdog that fails closed.
 - **Sessions:** recorded read-only from the charger entities, or added by hand; energy is
   booked to the car resolved at session end and can be reallocated.
 - **Panel:** every setting is edited in the panel (no app options, nothing to migrate).

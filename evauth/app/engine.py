@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import copy
 
-from .model import UNKNOWN_ID, Decision, Latch, Signal
+from .model import SCAN_SOURCES, UNKNOWN_ID, Decision, Latch, Signal
 from .policy import authorises, car_for_class, car_for_name, car_for_plate
 
 HOME = "home"
@@ -86,30 +86,36 @@ class Engine:
         sp = self.sources[source]
         cur = self.latch
         detail = detail or {}
-        name = self._label(car)
+        name = self.label(car)
 
         def keep(rule, why):
             return Decision(ts=ts, signal=sig, action="keep", car=cur.car, source=cur.source, tier=cur.tier,
                             rule=f"{source}.{rule}", reason=why, authorises=self.authorised(), detail=detail)
 
-        def do_set(rule, why):
-            self.latch = Latch(car=car, source=source, tier=sp["tier"], set_at=ts,
+        def do_set(rule, why, src=source):
+            tier = self.sources[src]["tier"]
+            self.latch = Latch(car=car, source=src, tier=tier, set_at=ts,
                                session_id=session_id if session_id else cur.session_id)
             if self.occupied is False:          # latched while the zone reads empty: the clear clock restarts
                 self.empty_since, self.empty_timeout = ts, self.policy["empty_clear_s"]
                 self.empty_checked = False
-            return Decision(ts=ts, signal=sig, action="set", car=car, source=source, tier=sp["tier"],
+            return Decision(ts=ts, signal=sig, action="set", car=car, source=src, tier=tier,
                             rule=f"{source}.{rule}", reason=why, authorises=self.authorised(), detail=detail)
 
         if car == UNKNOWN_ID:
             if cur.car is None:
                 return do_set("set_unknown", f"{source}: no known car matched; latched Unknown on an empty latch")
-            return keep("unknown_kept", f"{source}: Unknown read ignored; latch stays {self._label(cur.car)}")
+            return keep("unknown_kept", f"{source}: Unknown read ignored; latch stays {self.label(cur.car)}")
 
         if cur.car == car:
             if sp["refresh_same"]:
+                if self.authorised() and not sp["authorises"]:      # never take authority away by seeing the car
+                    return do_set("refresh", f"{source}: {name} seen again; latch time refreshed, "
+                                             f"still {cur.source}", cur.source)
                 return do_set("refresh", f"{source}: {name} seen again; latch time refreshed")
-            if (self.policy.get("upgrade_same_car") and sp.get("authorises") and source != "classifier"
+            # a scan may always authorise the car already latched; for other sources it is a setting
+            may_upgrade = source in SCAN_SOURCES or self.policy.get("upgrade_same_car")
+            if (may_upgrade and sp.get("authorises") and source != "classifier"
                     and not self.authorised()):
                 return do_set("upgrade", f"{source}: confirmed {name}; latch upgraded from {cur.source}")
             return keep("same", f"{source}: {name} already latched")
@@ -119,9 +125,9 @@ class Engine:
         elif cur.car == UNKNOWN_ID:
             ok, cls = sp["over_unknown"], "Unknown"
         elif ts - cur.set_at > self.policy["stale_after_s"]:
-            ok, cls = sp["over_known_stale"], f"stale {self._label(cur.car)}"
+            ok, cls = sp["over_known_stale"], f"stale {self.label(cur.car)}"
         else:
-            ok, cls = sp["over_known_fresh"], f"fresh {self._label(cur.car)}"
+            ok, cls = sp["over_known_fresh"], f"fresh {self.label(cur.car)}"
         if ok:
             return do_set("set", f"{source}: latched {name} over {cls}")
         return keep("blocked", f"{source}: {name} may not overwrite {cls}")
@@ -132,7 +138,7 @@ class Engine:
         return Decision(ts=ts, signal=sig, action="clear", car=None, source=None, tier=None, rule=rule,
                         reason=reason, authorises=False, detail={"was": was})
 
-    def _label(self, car_id) -> str:
+    def label(self, car_id) -> str:
         if car_id is None:
             return "none"
         if car_id == UNKNOWN_ID:
@@ -270,16 +276,16 @@ class Engine:
                     if car_id not in self._held_gps:
                         self._held_gps.add(car_id)
                         out.append(self._dec("gps", now, "keep", "clear.gps_held_charging",
-                                             f"{self._label(car_id)} reads away from home but is plugged in or charging; latch kept"))
+                                             f"{self.label(car_id)} reads away from home but is plugged in or charging; latch kept"))
                     continue
                 t.away_fired = True
                 t.away_since = None
                 if self.latch.car == car_id:
                     out.append(self.clear(now, "gps", "clear.gps_left_home",
-                                          f"{self._label(car_id)} left home to {t.state!r}; latch cleared"))
+                                          f"{self.label(car_id)} left home to {t.state!r}; latch cleared"))
                 else:
                     out.append(self._dec("gps", now, "keep", "clear.gps_left_home_other",
-                                         f"{self._label(car_id)} left home but is not the latched car"))
+                                         f"{self.label(car_id)} left home but is not the latched car"))
         return out
 
     def _clear_when_empty(self, now: float) -> list[Decision]:

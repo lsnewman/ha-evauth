@@ -6,7 +6,7 @@ opened per distinct (engine, HA) pair, and closed with a time when they agree ag
 """
 from __future__ import annotations
 
-from .model import UNKNOWN_ID, UNKNOWN_NAME
+from .model import SCAN_SOURCES, UNKNOWN_ID, UNKNOWN_NAME
 
 
 class Shadow:
@@ -81,9 +81,12 @@ class Shadow:
             self.store.close_disagreement(self.open["id"], now)
             out.append({"event": "closed", "id": self.open["id"]})
         d = self.last_decision
+        # The HA helpers never hear of the app's scan flow, so differences it causes need no review.
+        scan = eng[1] in SCAN_SOURCES
         did = self.store.open_disagreement(
             now, kind, eng, ha, d.signal if d else "", d.rule if d else "",
-            d.reason if d else "no engine decision yet")
+            d.reason if d else "no engine decision yet",
+            status="intended" if scan else "open", note="app scan flow" if scan else "")
         self.open = {"id": did, "key": key}
         out.append({"event": "opened", "id": did, "kind": kind})
         return out

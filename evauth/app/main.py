@@ -20,12 +20,14 @@ def main():
     logging.basicConfig(level=getattr(logging, app.cfg["log_level"].upper(), logging.INFO),
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     log = logging.getLogger("evauth")
-    log.info("EVAuth %s starting (%s mode, observe only; nothing is written to Home Assistant)",
-             os.environ.get("EVAUTH_VERSION", "dev"), "dev" if dev else "app")
+    log.info("EVAuth %s starting (%s mode; charging control: %s)",
+             os.environ.get("EVAUTH_VERSION", "dev"), "dev" if dev else "app", app.cfg["control"]["mode"])
     if dev:
         app.start()
     else:
-        app.start(ha=HAClient(app.on_state), mqtt=MqttIn(lambda: app.cfg, app.on_frigate, app.on_stats))
+        ha = HAClient(app.on_state, on_event=app.on_ha_event, on_connect=app.on_ha_connect,
+                      on_disconnect=app.on_ha_disconnect)
+        app.start(ha=ha, mqtt=MqttIn(lambda: app.cfg, app.on_frigate, app.on_stats))
     port = int(os.environ.get("EVAUTH_PORT", "8099"))
     srv = make_server(Api(app), port, allow_all=dev)
     stop = threading.Event()

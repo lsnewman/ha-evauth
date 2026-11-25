@@ -1,14 +1,14 @@
 # EVAuth design
 
 EVAuth replaces carport EV latching and charge-authorisation logic that used to live in HA helpers
-and automations. It is built in phases; only phases 1 and 2 exist in this release.
+and automations. It is built in phases.
 
 | Phase | What | State |
 | --- | --- | --- |
 | 1 | Session store, picker, car/user config. No effect on charging | built |
 | 2 | Latching engine in shadow mode beside the HA automations | built |
-| 3 | Review disagreements, cut over when each is explained | after weeks of shadow data |
-| 4 | Scan flow: Availability on, car picker, 90 s default, 10 min no-plug-in rule | pure state machine + tests only |
+| 3 | Review disagreements, cut over when each is explained | shadow comparison carries on |
+| 4 | Charging control: scan flow and charger Availability | built; off until enabled (dry run, then live) |
 | 5 | Retire the old helpers and automations | later |
 
 ## Fixed rules
@@ -20,6 +20,7 @@ and automations. It is built in phases; only phases 1 and 2 exist in this releas
 5. Energy is booked per car, at session end.
 6. An unmapped phone authorises nothing.
 7. Availability goes on at scan and back off if the charger has not left Available within 10 minutes with no valid latch.
+8. A running or plugged-in session is never disabled.
 
 ## Engine
 
@@ -49,7 +50,7 @@ Each is open for review.
    same as before). It was a side effect, not a design choice.
 4. Occupancy `unavailable`/`unknown` means "no change", never a clear.
 5. Sources `elimination` and `plug` are dropped.
-6. The 90 s `default` source cannot overwrite a standing latch (phase 4).
+6. The 90 s `default` source cannot overwrite a standing known car (see 16).
 7. The "leaves home" rule is unchanged (any non-home state clears, so carport to work clears); only the log wording is corrected.
 8. An event log in SQLite replaces logbook lines and the observe-only automations.
 9. Ledgers are derived from sessions inside the app; mirroring to HA `input_number` helpers is deferred.
@@ -69,34 +70,82 @@ Each is open for review.
     (`restart_grace_s`, default 3 min, for Frigate to re-detect the car) and then the normal clear time. The old automation has the same blind spot, with no timer at all.
 15. **New:** a latch made while the zone reads empty starts a fresh clear clock.
 
+16. **New:** if a scan goes unanswered and a known car is already latched without authority (the classifier),
+    the scan authorises that car, as source `nfc`. Otherwise the user's default car is used. The old
+    automation overwrote any latch with the default.
+17. **New:** a non-authorising source seeing the authorised car again refreshes the latch time but keeps the
+    authorising source, so a plate read cannot revoke a scan when LPR is set not to authorise.
+18. Scan latches (`nfc`, `prompt`, `default`) never reach the old helpers, so shadow rows they cause are
+    recorded as *intended* automatically.
+
 ## Assumptions to verify against real payloads
 
 - The classifier result arrives as the object's own `Car Identity` `[name, score]` at the top level of
   `before`/`after`. If your Frigate version nests it (for example under `attributes`), `frigate.py` needs a one-line change.
 - `device_tracker` `in_zones` lists the carport zone entity id.
+- The `device_id` on a tag scan is the device-registry id chosen on the Users page.
+- A tap on an actionable notification arrives as `mobile_app_notification_action` with the button's `action`.
+- The Availability switch reports its new state within 30 seconds of a command.
+- Turning the switch off and on around a charger or Home Assistant restart does not look like manual use
+  (it passes through unavailable).
 
-## Phase 4 sketch (not connected)
+## Charging control (phase 4)
 
-Scan -> user from the phone's device id -> Availability on -> picker (iOS actionable notification) ->
-pick sets `prompt`; no pick in 90 s sets the user's default car (`default`) -> if still no valid latch and
-no plug-in after 10 min, Availability off.
+**The app acts; Home Assistant watches.** The app hears the tag scan and the notification tap, maps the phone
+to a user, runs the timers, switches charger Availability and sends the messages, so there is one tested,
+restart-safe state machine (`charging.py`, pure). Home Assistant keeps only what must work when the app is
+dead: the watchdog.
 
-### Watchdog proposal (HA side, for your approval; nothing has been written)
+| Mode | Scans | Notifications | Switch |
+| --- | --- | --- | --- |
+| off (default) | ignored | none | untouched |
+| dry run | handled | sent, marked `[dry run]` | commands only logged, against a simulated switch |
+| live | handled | sent | switched |
 
-The app will publish a heartbeat; a small HA automation turns Availability off when it goes quiet.
-Entity names below are placeholders.
+Live can only be selected when the switch, connector sensor, tag, a complete user, Home Assistant, MQTT and
+the watchdog are all in place. Leaving live turns Availability on once.
+
+**On** (events): a scan by an allowed user; a latch becoming authorised (which sources authorise is the per-source
+setting); after a restart or reconnect, an authorised latch with an occupied zone. A manual off is respected
+until the next such event.
+
+**Off** (condition): nothing authorises, no scan is waiting, no plug-in window is open, and the connector is
+known to have nothing plugged in. The window (10 minutes) opens on a scan, and when someone else turns the
+switch on. An unconfirmed command is sent three times, then reported to the owner and repeated every 10 minutes.
+
+**Scan:** unmapped or disallowed phone: owner told, nothing changes. Otherwise Availability on; if nothing
+authorises yet, a notification with one button per car. Tap: `prompt`. No answer in 90 s: see deviation 16.
+
+### Watchdog
+
+The app publishes `sensor.evauth_heartbeat` through MQTT discovery every 30 s while it is connected to Home
+Assistant (from the first time charging control is enabled; it carries on if control is switched off again).
+The entity expires after the watchdog timeout (default 120 s). This automation lives in Home Assistant; replace
+the placeholder entity names. It acts only with nothing plugged in, about 4 minutes at most after the app dies.
 
 ```yaml
 alias: EVAuth watchdog
-trigger:
-  - platform: state
+triggers:
+  - trigger: time_pattern
+    minutes: "/1"
+conditions:
+  - condition: state
     entity_id: sensor.evauth_heartbeat
-    to: unavailable
-    for: "00:02:00"
-  - platform: homeassistant
-    event: start
-action:
-  - service: switch.turn_off
+    state: [unavailable, unknown]
+    for: "00:01:00"
+  - condition: state
+    entity_id: switch.my_charger_availability
+    state: "on"
+  - condition: state
+    entity_id: sensor.my_charger_status_connector
+    state: Available
+actions:
+  - action: switch.turn_off
     target:
-      entity_id: switch.charger_availability
+      entity_id: switch.my_charger_availability
+  - action: notify.mobile_app_your_phone
+    data:
+      message: EVAuth is not responding; charger Availability turned off.
 ```
+
+**Rollback:** set the mode to off, disable the watchdog, and re-enable whatever handled the tag before.

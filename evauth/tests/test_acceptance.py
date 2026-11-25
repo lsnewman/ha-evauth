@@ -4,8 +4,7 @@ Car names are synthetic: Alpha stands in for the GPS-tracked car, Bravo for the 
 """
 from app.engine import Engine
 from app.model import UNKNOWN_ID
-from app.scan import ScanFlow, watchdog_expired
-from rig import Rig
+from rig import Flow, Rig, notices, switched
 
 
 def test_lpr_known_car():
@@ -110,83 +109,75 @@ def test_gps_car_leaves_for_other_zone_clears_after_2_min():
 
 
 def test_scan_mapped_phone_no_latch_then_pick_sets_prompt():
-    r = Rig()
-    f = ScanFlow(r.engine)
-    acts = f.scan(r.now, "dev_ann")
-    assert {"type": "availability", "on": True} in acts
-    assert any(a["type"] == "picker" for a in acts)
-    f.pick(r.now + 5, "bravo")
-    assert (r.car, r.source) == ("bravo", "prompt")
+    f = Flow()
+    f.advance(60)                                    # idle: Availability off
+    acts = f.scan()
+    assert switched(acts) == [True]
+    assert notices(acts)[0]["data"]["actions"]
+    f.advance(5)
+    f.tap("bravo")
+    assert (f.car, f.source) == ("bravo", "prompt")
 
 
 def test_scan_no_pick_in_90s_sets_default_car():
-    r = Rig()
-    f = ScanFlow(r.engine)
-    f.scan(r.now, "dev_ann")
-    f.tick(r.now + 89)
-    assert r.car is None
-    f.tick(r.now + 91)
-    assert (r.car, r.source) == ("alpha", "default")
+    f = Flow()
+    f.scan()
+    f.advance(89)
+    assert f.car is None
+    f.advance(2)
+    assert (f.car, f.source) == ("alpha", "default")
 
 
 def test_scan_with_valid_latch_and_availability_on_changes_nothing():
-    r = Rig()
-    r.apply("prompt", "bravo")
-    f = ScanFlow(r.engine)
-    f.availability = True
-    acts = f.scan(r.now + 1, "dev_ann")
-    assert all(a["type"] == "log" for a in acts)
-    assert r.car == "bravo" and f.pending is None
+    f = Flow()
+    f.apply("prompt", "bravo")
+    f.step()
+    acts = f.scan()
+    assert switched(acts) == [] and not any(a["type"] == "decision" for a in acts)
+    assert f.car == "bravo" and f.charge.pending is None
 
 
 def test_scan_unmapped_phone_logs_notifies_owner_availability_unchanged():
-    r = Rig()
-    f = ScanFlow(r.engine)
-    acts = f.scan(r.now, "dev_stranger")
-    assert f.availability is False
-    assert any(a["type"] == "notify" and a["target"] == "notify.mobile_app_ann" for a in acts)
-    assert not any(a["type"] in ("availability", "picker") for a in acts)
-    assert r.car is None
+    f = Flow()
+    f.advance(60)
+    acts = f.scan("dev_stranger")
+    assert notices(acts)[0]["target"] == "notify.mobile_app_ann"
+    assert switched(acts) == [] and f.charge.switch is False and f.car is None
 
 
 def test_scan_from_disallowed_user_authorises_nothing():
-    r = Rig()
-    f = ScanFlow(r.engine)
-    acts = f.scan(r.now, "dev_ben")
-    assert f.availability is False and not any(a["type"] == "picker" for a in acts)
+    f = Flow()
+    f.advance(60)
+    acts = f.scan("dev_ben")
+    assert switched(acts) == [] and f.charge.pending is None
 
 
 def test_no_plugin_within_10_min_without_latch_turns_availability_off():
     # A user with no default car: the 90 s fallback cannot latch, so there is still no valid latch.
-    r = Rig()
-    r.cfg["users"][0]["default_car"] = ""
-    f = ScanFlow(r.engine)
-    f.scan(r.now, "dev_ann")
-    f.tick(r.now + 599)
-    assert f.availability is True
-    acts = f.tick(r.now + 601)
-    assert {"type": "availability", "on": False} in acts and f.availability is False
+    f = Flow()
+    f.cfg["users"][0]["default_car"] = ""
+    f.advance(60)
+    f.scan()
+    f.advance(599)
+    assert f.charge.switch is True
+    assert switched(f.advance(2)) == [False]
 
 
 def test_valid_latch_is_never_disabled_by_the_no_plugin_rule():
-    r = Rig()
-    f = ScanFlow(r.engine)
-    f.scan(r.now, "dev_ann")
-    f.pick(r.now + 5, "alpha")
-    acts = f.tick(r.now + 700)
-    assert f.availability is True and not any(a["type"] == "availability" for a in acts)
+    f = Flow()
+    f.scan()
+    f.advance(5)
+    f.tap("alpha")
+    assert switched(f.advance(700)) == [] and f.charge.switch is True
 
 
-def test_watchdog_turns_availability_off_when_app_goes_quiet():
-    assert watchdog_expired(None, 1000, 120) is True
-    assert watchdog_expired(900, 1000, 120) is False
-    assert watchdog_expired(800, 1000, 120) is True
+# the watchdog row: Home Assistant does the turning off; test_charging.py covers the app's side
+# (the heartbeat that stops when the app cannot act)
 
 
 def test_default_fallback_that_latches_means_no_plugin_rule_does_not_apply():
-    r = Rig()
-    f = ScanFlow(r.engine)
-    f.scan(r.now, "dev_ann")
-    f.tick(r.now + 100)                       # default car latched at 90 s
-    acts = f.tick(r.now + 700)
-    assert r.car == "alpha" and f.availability is True and not acts
+    f = Flow()
+    f.scan()
+    f.advance(100)                                   # default car latched at 90 s
+    assert switched(f.advance(700)) == []
+    assert f.car == "alpha" and f.charge.switch is True

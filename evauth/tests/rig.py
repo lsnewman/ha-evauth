@@ -2,6 +2,7 @@
 import json
 
 from app import settings
+from app.charging import ChargeController
 from app.engine import Engine
 from app.frigate import parse_event
 from app.signals import gps_signal, occupancy_signal
@@ -79,3 +80,68 @@ class Rig:
     @property
     def source(self):
         return self.engine.latch.source
+
+
+class Flow(Rig):
+    """A Rig with the charging control on top. It plays the charger: real switch commands are
+    reflected back as switch states unless `obey` is False."""
+
+    def __init__(self, mode="live", switch="off", connector="Available", saved=None, connect=True,
+                 latched=None, **over):
+        super().__init__(control={"mode": mode}, **over)
+        if latched:                                  # a latch restored from disk, as after a restart
+            self.apply(*latched)
+        self.charge = ChargeController(self.engine, saved, nonce=lambda: "n1")
+        self.obey = True
+        self.acts = []
+        if connect:
+            self.charge.reconnected(self.now)
+        self.charge.connector_state(connector)
+        if switch is not None:
+            self.charge.switch_state(self.now, switch)
+        self.step()
+
+    def step(self, acts=()):
+        acts = list(acts) + self.charge.update(self.now)
+        self.acts += acts
+        for a in acts:
+            if a["type"] == "availability" and not a["dry"] and self.obey and self.charge.actual is not None:
+                self.charge.switch_state(self.now, "on" if a["on"] else "off")
+        return acts
+
+    def advance(self, s):
+        self.now += s
+        self.tick()
+        return self.step()
+
+    def run(self, seconds, step=1):
+        out = []
+        for _ in range(int(seconds / step)):
+            out += self.advance(step)
+        return out
+
+    def scan(self, device="dev_ann"):
+        return self.step(self.charge.scan(self.now, device))
+
+    def tap(self, car, nonce="n1"):
+        return self.step(self.charge.notification_action(self.now, f"EVAUTH_PICK:{nonce}:{car}"))
+
+    def switch(self, state):
+        return self.step(self.charge.switch_state(self.now, state))
+
+    def connector(self, state):
+        self.charge.connector_state(state)
+        return self.step()
+
+    def seen(self, name):
+        self.frigate(name)
+        return self.step()
+
+
+def switched(acts):
+    """The on/off commands in a list of actions."""
+    return [a["on"] for a in acts if a["type"] == "availability"]
+
+
+def notices(acts):
+    return [a for a in acts if a["type"] == "notify"]

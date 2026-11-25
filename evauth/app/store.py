@@ -69,6 +69,10 @@ class Store:
             return self._q("SELECT * FROM events WHERE action=? ORDER BY id DESC LIMIT ?", (action, limit))
         return self._q("SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,))
 
+    def notes(self, signal: str, limit: int = 20) -> list[dict]:
+        return self._q("SELECT ts, reason FROM events WHERE signal=? AND action='note' ORDER BY id DESC LIMIT ?",
+                       (signal, limit))
+
     def latch_history(self, limit: int = 100) -> list[dict]:
         return self._q("SELECT * FROM latch_history ORDER BY id DESC LIMIT ?", (limit,))
 
@@ -118,9 +122,10 @@ class Store:
         return {r["car_id"]: r["kwh"] or 0.0 for r in rows}
 
     # ---------------------------------------------------------- disagreements
-    def open_disagreement(self, ts, kind, engine, ha, signal, rule, reason) -> int:
-        return self._x("INSERT INTO disagreements(ts,kind,engine_car,engine_source,ha_car,ha_source,signal,rule,reason)"
-                       " VALUES(?,?,?,?,?,?,?,?,?)", (ts, kind, engine[0], engine[1], ha[0], ha[1], signal, rule, reason))
+    def open_disagreement(self, ts, kind, engine, ha, signal, rule, reason, status="open", note="") -> int:
+        return self._x("INSERT INTO disagreements(ts,kind,engine_car,engine_source,ha_car,ha_source,signal,rule,reason,"
+                       "status,note) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                       (ts, kind, engine[0], engine[1], ha[0], ha[1], signal, rule, reason, status, note))
 
     def close_disagreement(self, did: int, ts: float):
         self._x("UPDATE disagreements SET resolved_ts=? WHERE id=? AND resolved_ts IS NULL", (ts, did))

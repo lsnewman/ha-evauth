@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import options as opts
 from .model import UNKNOWN_ID
-from .settings import ConfigError
+from .settings import ConfigError, migrate, validate_doc
 
 log = logging.getLogger("evauth.web")
 INGRESS_IPS = {"172.30.32.2"}
@@ -50,8 +50,17 @@ class Api:
     def get_settings(self):
         return self.app.settings.get()
 
+    def _gate(self, doc):
+        """Live mode may only be selected when everything it relies on is in place."""
+        if (doc.get("control") or {}).get("mode") != "live" or self.app.cfg["control"]["mode"] == "live":
+            return
+        missing = [r["label"] for r in self.app.readiness(validate_doc(doc)) if not r["ok"]]
+        if missing:
+            raise ApiError(409, "not ready for live mode: " + "; ".join(missing))
+
     def put_settings(self, body):
         try:
+            self._gate(body)
             self.app.settings.replace(body)
         except ConfigError as e:
             raise ApiError(400, str(e)) from None
@@ -60,7 +69,11 @@ class Api:
 
     def patch_settings(self, section, body):
         try:
-            self.app.settings.update_section(section, body.get("value") if "value" in body else body)
+            value = body.get("value") if "value" in body else body
+            if section == "control" and isinstance(value, dict):
+                cur = self.app.settings.get()
+                self._gate({**cur, "control": {**cur["control"], **value}})
+            self.app.settings.update_section(section, value)
         except ConfigError as e:
             raise ApiError(400, str(e)) from None
         self.app.reload()
@@ -68,6 +81,7 @@ class Api:
 
     def import_settings(self, body):
         try:
+            self._gate(migrate(dict(body)))
             self.app.settings.import_doc(body)
         except ConfigError as e:
             raise ApiError(400, str(e)) from None
@@ -141,11 +155,13 @@ class Api:
         return {"ok": True}
 
     def pick(self, body):
-        """The phase-1 picker: allocate the open (or latest) session to a car. Never touches the charger."""
+        """The panel picker: answer a scan that is waiting, else allocate the open (or latest) session."""
         car = body.get("car_id")
         self._car_ok(car)
         if not car:
             raise ApiError(400, "choose a car")
+        if car != UNKNOWN_ID and self.app.panel_pick(car):
+            return {"scan": True, "car_id": car}
         s = self.app.store.open_session() or next(iter(self.app.store.sessions(1)), None)
         if not s:
             raise ApiError(409, "there is no session to allocate yet")
@@ -173,6 +189,10 @@ class Api:
         self.app.on_frigate(body)
         return self.app.status()
 
+    def dev_event(self, body):
+        self.app.on_ha_event(body["event_type"], body.get("data") or {})
+        return self.app.status()
+
     def dev_state(self, body):
         self.app.on_state(body["entity_id"], {"state": body.get("state"), "attributes": body.get("attributes") or {},
                                               "entity_id": body["entity_id"]})
@@ -195,7 +215,7 @@ ROUTES = [
     ("GET", r"/api/events", "events"), ("GET", r"/api/disagreements", "disagreements"),
     ("PATCH", r"/api/disagreements/(?P<did>\d+)", "annotate"),
     ("POST", r"/api/dev/frigate", "dev_frigate"), ("POST", r"/api/dev/state", "dev_state"),
-    ("POST", r"/api/dev/advance", "dev_advance"),
+    ("POST", r"/api/dev/advance", "dev_advance"), ("POST", r"/api/dev/event", "dev_event"),
 ]
 
 

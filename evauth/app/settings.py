@@ -15,6 +15,7 @@ import os
 import re
 import threading
 
+from .charging import MODES
 from .model import SOURCES, TIERS, UNKNOWN_ID, UNKNOWN_NAME
 
 log = logging.getLogger("evauth.settings")
@@ -43,7 +44,7 @@ def _src(tier, min_score, empty, unknown, fresh, stale, refresh, authorises):
 
 # The inventory's override table, as data. `lpr` Unknown reads only ever fill an empty
 # latch (fixed in code), whatever these say. `classifier` can never authorise (fixed).
-# `authorises` means "counts as a valid latch": Availability may stay on for this car.
+# `authorises` means "counts as a valid latch": it turns Availability on and keeps it on.
 DEFAULT_SOURCES = {
     "lpr":        _src("confident",     0.75, True, True, True,  True,  True,  True),
     "gps":        _src("confident",     0.0,  True, True, False, True,  False, True),
@@ -59,8 +60,8 @@ POLICY_SPEC = {
     "stale_after_s": (int, 0, 86400, 300),        # a latch older than this counts as stale
     "empty_clear_s": (int, 1, 86400, 300),        # zone empty this long -> clear
     "gps_leave_clear_s": (int, 1, 86400, 120),    # tracker away from home this long -> clear
-    "default_timeout_s": (int, 5, 600, 90),       # picker unanswered -> default car (phase 4)
-    "no_plugin_s": (int, 60, 7200, 600),          # no plug-in this long -> Availability off (phase 4)
+    "default_timeout_s": (int, 5, 600, 90),       # picker unanswered -> default car
+    "no_plugin_s": (int, 60, 7200, 600),          # after a scan, Availability stays on this long without a latch
     "restart_grace_s": (int, 0, 3600, 180),       # after a restart / lost sensor, ignore "empty" this long (Frigate re-detects), then the normal clear time applies
     "shadow_settle_s": (int, 0, 120, 5),          # wait before comparing with the HA latch
     "watchdog_timeout_s": (int, 30, 3600, 120),   # heartbeat silence before HA turns Availability off
@@ -80,6 +81,8 @@ DEFAULT_FRIGATE = {
     "zone": "", "label": "car", "classifier_attribute": "Car Identity",
     "trust_sub_label": True,        # fall back to Frigate's own sub_label when no plate pattern matches
 }
+# mode: off = shadow only; dry_run = whole scan flow, switch commands only logged; live = switches Availability
+DEFAULT_CONTROL = {"mode": "off", "tag_id": "", "watchdog_automation": ""}
 DEFAULT_COLOURS = {"none": "off", "occupied_unknown": "red", "non_confident": "amber", "confident": "green"}
 
 
@@ -97,6 +100,7 @@ def default_doc() -> dict:
         "cars": [],
         "users": [],
         "shadow": {"enabled": True},
+        "control": dict(DEFAULT_CONTROL),
     }
 
 
@@ -184,6 +188,16 @@ def validate_mqtt(m: dict) -> dict:
     return {"host": str(m.get("host", "") or "").strip(),
             "port": _num("mqtt.port", m.get("port", 1883) or 1883, int, 1, 65535),
             "username": str(m.get("username", "") or ""), "password": str(m.get("password", "") or "")}
+
+
+def validate_control(c: dict) -> dict:
+    if not isinstance(c, dict):
+        raise ConfigError("control must be an object")
+    mode = c.get("mode", "off")
+    if mode not in MODES:
+        raise ConfigError(f"control mode must be one of {', '.join(MODES)}")
+    return {"mode": mode, "tag_id": str(c.get("tag_id", "") or "").strip(),
+            "watchdog_automation": _entity("watchdog_automation", c.get("watchdog_automation", ""))}
 
 
 def validate_colours(c: dict) -> dict:
@@ -274,6 +288,7 @@ def validate_doc(doc: dict) -> dict:
     out["policy"] = validate_policy(doc.get("policy", {}))
     out["sources"] = validate_sources(doc.get("sources", {}))
     out["colours"] = validate_colours(doc.get("colours", {}))
+    out["control"] = validate_control(doc.get("control", {}))
     out["cars"] = validate_cars(doc.get("cars", []))
     out["users"] = validate_users(doc.get("users", []), {c["id"] for c in out["cars"]})
     out["shadow"] = {"enabled": _bool("shadow.enabled", (doc.get("shadow") or {}).get("enabled", True))}
@@ -296,7 +311,8 @@ def sanitise(doc) -> tuple[dict, list[str]]:
             except Exception as e:      # noqa: BLE001
                 warnings.append(f"{k}: {e}; default used")
     sections = {"entities": validate_entities, "frigate": validate_frigate, "mqtt": validate_mqtt,
-                "policy": validate_policy, "sources": validate_sources, "colours": validate_colours}
+                "policy": validate_policy, "sources": validate_sources, "colours": validate_colours,
+                "control": validate_control}
     for k, fn in sections.items():
         try:
             out[k] = fn(doc.get(k, {}))

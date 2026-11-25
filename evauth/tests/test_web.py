@@ -34,6 +34,7 @@ def test_state_and_settings_roundtrip(served):
     app, req = served
     code, st = req("GET", "/api/state")
     assert code == 200 and st["mode"].startswith("shadow") and st["engine"]["latch"]["car"] is None
+    assert st["charging"]["mode"] == "off"
     code, s = req("PATCH", "/api/settings/policy", {"stale_after_s": 200})
     assert code == 200 and s["policy"]["stale_after_s"] == 200 and app.cfg["policy"]["stale_after_s"] == 200
     code, err = req("PATCH", "/api/settings/policy", {"stale_after_s": -5})
@@ -111,8 +112,9 @@ def test_options_reports_failures_instead_of_raising():
         def list_entities(self): raise RuntimeError("no states")
         def services(self): raise RuntimeError("no services")
         def device_registry(self): raise RuntimeError("no registry")
+        def tags(self): raise RuntimeError("no tags")
     o = options.build(Broken(), {"cameras": set(), "zones": set(), "classes": set()}, False)
-    assert set(o["errors"]) == {"entities", "notify", "devices"} and o["entities"]["sensor"] == []
+    assert set(o["errors"]) == {"entities", "notify", "devices", "tags"} and o["entities"]["sensor"] == []
 
 
 def test_notify_and_device_parsing():

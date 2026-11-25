@@ -2,6 +2,23 @@
 
 Bump `version` in `config.yaml` with every release, or Home Assistant will not offer the update.
 
+## 0.2.0b1
+
+Charging control. It is **off** after updating, so nothing changes until you enable it on the Status page.
+
+- **Scan flow:** a tag scan turns charger Availability on and, if nothing authorises yet, sends a car picker.
+  No answer in 90 s authorises the car already identified by the classifier, else your default car.
+- **Availability** turns on for a scan or a newly authorised latch, and off when nothing authorises, no
+  10 minute window is open and nothing is plugged in.
+- **Dry run** and **Live** modes. Live needs a watchdog automation and a heartbeat over MQTT.
+- Setup: select the Availability switch (Sources), the NFC tag and watchdog (Settings), and give each user a
+  default car (Users).
+- The "counts as valid latch" setting now reads "authorises charging (turns Availability on)".
+- A plate read by a non-authorising source no longer takes authority away from a scan.
+- Shadow rows caused by the scan flow are marked intended automatically.
+- Fixed: the Home Assistant connection reused message ids for keep-alive pings, and did not notice a silent
+  connection.
+
 ## 0.1.0b4
 
 - **Restarts:** after the app restarted, the shadow page briefly reported the app's latch as "none" (a false

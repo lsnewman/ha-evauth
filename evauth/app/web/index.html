@@ -50,7 +50,7 @@ const listFor=k=>!OPT?[]:(OPT.entities[k]||OPT[k]||OPT.frigate[k]||[]).map(x=>ty
 function P(v,on,kind,ph){const hint=h("div",{class:"small mut"});
  const upd=val=>{const L=listFor(kind);const m=L.find(x=>x.value===val);hint.className="small "+(m||!val||!L.length?"mut":"warn");hint.textContent=m?(m.label!==m.value?m.label:""):(val&&L.length?"not found in the list":"")};
  upd(v);return h("div",{},h("input",{type:"text",value:v??"",placeholder:ph||(listFor(kind).length?"type to search…":""),list:"dl-"+kind,on:{input:e=>{on(e.target.value);upd(e.target.value)}}}),hint)}
-function buildLists(){const box=$("#dls");const kinds={...OPT.entities,notify:OPT.notify,devices:OPT.devices,cameras:OPT.frigate.cameras,zones:OPT.frigate.zones,classes:OPT.frigate.classes};
+function buildLists(){const box=$("#dls");const kinds={...OPT.entities,notify:OPT.notify,devices:OPT.devices,tags:OPT.tags,cameras:OPT.frigate.cameras,zones:OPT.frigate.zones,classes:OPT.frigate.classes};
  box.replaceChildren(...Object.entries(kinds).map(([k,L])=>h("datalist",{id:"dl-"+k},L.map(x=>{x=typeof x==="string"?{value:x,label:x}:x;return h("option",{value:x.value,label:x.label})}))))}
 const N=(v,on,step)=>h("input",{type:"number",value:v,step:step||"any",on:{input:e=>on(e.target.value===""?"":Number(e.target.value))}});
 const C=(v,on,lab)=>h("label",{class:"row"},h("input",{type:"checkbox",checked:!!v,on:{change:e=>on(e.target.checked)}}),lab);
@@ -58,17 +58,33 @@ const SEL=(v,opts,on)=>h("select",{on:{change:e=>on(e.target.value)}},opts.map((
 const carOpts=(blank)=>[...(blank?[["",blank]]:[]),...CFG.cars.map(c=>[c.id,c.name])];
 
 const V={};
+const onOff=v=>v==null?"unknown":v?"on":"off";
+async function setMode(mode){const msg={live:"Go live? The app will switch charger Availability.",off:"Turn charging control off?",dry_run:"Switch to dry run? Nothing will be switched."}[mode]+(CFG.control.mode==="live"&&mode!=="live"?" Availability will be turned on.":"");
+ if(!confirm(msg))return;try{CFG=await api("PATCH","settings/control",{mode});flash("Charging control: "+mode.replace("_"," "))}catch(e){flash(null,e.message)}}
+function charging(){const c=S.charging,m=c.mode;
+ return h("div",{class:"card"},h("h2",{},"Charging control"),
+  h("div",{class:"row"},[["off","Off"],["dry_run","Dry run"],["live","Live"]].map(([k,l])=>h("button",{class:k===m?"":"sec",on:{click:()=>k!==m&&setMode(k)}},l))),
+  m==="off"?h("p",{class:"mut small"},"Shadow comparison only. Nothing is switched and scans are ignored."):[
+   h("div",{class:"big"},`Availability ${onOff(c.switch)}`+(m==="dry_run"?" (simulated)":"")),
+   h("div",{class:"mut"},`Real switch: ${onOff(c.actual)} · connector: ${c.connector||"unknown"} · ${c.wanted?"reason to be on":"nothing needs it on"}`),
+   c.pending?h("div",{class:"warn"},`Waiting for ${c.pending.user} to pick a car (${c.pending.seconds} s). The picker on the Sessions page answers it too.`):null,
+   c.window_seconds?h("div",{},`Plug-in window: ${Math.ceil(c.window_seconds/60)} min left`):null,
+   c.command?h("div",{class:c.command.gave_up?"bad":"mut"},`Switch ${c.command.on?"on":"off"} ${c.command.gave_up?"failed; will retry":"sent, not yet confirmed"}`):null],
+  m!=="live"||c.readiness.some(r=>!r.ok)?[h("h3",{},m==="live"?"Needs attention":"Needed for live"),h("div",{class:"small"},c.readiness.map(r=>h("div",{class:r.ok?"ok":"warn"},(r.ok?"✓ ":"✗ ")+r.label)))]:null,
+  c.recent.length?[h("h3",{},"Recent"),h("table",{},h("tbody",{},c.recent.map(n=>h("tr",{},h("td",{class:"small mut"},fmt(n.ts)),h("td",{class:"small"},n.reason)))))]:null)}
+
 V.status=()=>{const e=S.engine,l=e.latch,sh=S.shadow;
- const setup=!S.setup_done?h("div",{class:"card"},h("h2",{},"First-run setup"),h("p",{class:"mut"},"Everything is set up here in the panel. Work down this list; nothing you do affects charging."),
+ const setup=!S.setup_done?h("div",{class:"card"},h("h2",{},"First-run setup"),h("p",{class:"mut"},"Everything is set up here in the panel. Work down this list; nothing affects charging until charging control is switched to Live."),
   h("ol",{},h("li",{},h("a",{href:"#entities"},"Pick your Frigate camera, zone and HA entities")),h("li",{},h("a",{href:"#cars"},"Add your cars (plates, Frigate class, GPS tracker)")),h("li",{},h("a",{href:"#users"},"Add users (phone, notify target, default car)")),h("li",{},h("a",{href:"#tiers"},"Check the tiers and timings (defaults match today's behaviour)"))),
   h("button",{on:{click:async()=>{await save("setup_done",true)}}},"Done, hide this")):null;
- return[setup,h("div",{class:"card"},h("h2",{},"Latch (the app's own, shadow)"),
+ return[setup,h("div",{class:"card"},h("h2",{},"Latch (the app's own)"),
   h("div",{class:"big"},carName(l.car)),h("div",{class:"mut"},l.car?`source ${l.source} · ${l.tier} · set ${fmt(l.set_at)}`:"no car latched"),
-  h("div",{},e.authorised?h("span",{class:"pill ok"},"would authorise charging"):h("span",{class:"pill warn"},"would not authorise"))),
+  h("div",{},e.authorised?h("span",{class:"pill ok"},"authorises charging"):h("span",{class:"pill warn"},"does not authorise"))),
+  charging(),
   h("div",{class:"card grid"},
    h("div",{},h("h2",{},"Zone"),e.occupied==null?"no reading yet":e.occupied?"occupied":"empty",h("div",{class:"small mut"},e.charger_present?"Charger: car plugged in (holds the latch)":"Charger: nothing plugged in")),
    h("div",{},h("h2",{},"Home Assistant"),S.ha),h("div",{},h("h2",{},"MQTT / Frigate"),S.mqtt),
-   h("div",{},h("h2",{},"Mode"),S.mode,h("div",{class:"small mut"},"Nothing is written to Home Assistant or the charger."))),
+   h("div",{},h("h2",{},"Mode"),S.mode)),
   h("div",{class:"card"},h("h2",{},"Shadow comparison"),
    sh.ha_seen?h("div",{},`HA latch: ${S.ha_latch.vehicle||"?"} (${S.ha_latch.source||"?"}) · engine: ${carName(sh.engine[0])} (${sh.engine[1]||"none"})`):h("div",{class:"warn"},"HA latch helpers not read yet. Set them under Sources."),
    h("div",{},sh.open_now?h("span",{class:"pill bad"},"disagreeing now"):h("span",{class:"pill ok"},"agree"),` open: ${sh.counts.open||0} · explained: ${sh.counts.explained||0} · intended: ${sh.counts.intended||0} · bug: ${sh.counts.bug||0}`),
@@ -80,10 +96,10 @@ V.entities=()=>{const f=CFG.frigate,e=CFG.entities,mk=(o,k,l,ph,kind)=>F(l,kind?
  return[h("div",{class:"card"},h("h2",{},"Frigate"),h("div",{class:"grid"},mk(f,"topic","Events topic"),mk(f,"camera","Camera name",null,"cameras"),mk(f,"zone","Zone name",null,"zones"),mk(f,"label","Object label"),mk(f,"classifier_attribute","Classifier attribute"),mk(f,"test_camera","Replay/test camera",null,"cameras"),
   C(f.accept_test_camera,v=>f.accept_test_camera=v,"Accept the test camera"),C(f.trust_sub_label,v=>f.trust_sub_label=v,"Fall back to Frigate's sub_label when no plate pattern matches")),
   h("button",{on:{click:()=>save("frigate",f)}},"Save Frigate")),
- h("div",{class:"card"},h("h2",{},"Home Assistant entities"),h("p",{class:"mut small"},"Read only. Type to search your Home Assistant entities; each field lists only the matching kind."),OPT&&Object.keys(OPT.errors).length?h("p",{class:"small warn"},"Some lookups failed, so those fields are plain text: "+Object.entries(OPT.errors).map(([k,v])=>k+" ("+v+")").join("; ")):null,
+ h("div",{class:"card"},h("h2",{},"Home Assistant entities"),h("p",{class:"mut small"},"Only the Availability switch is ever switched, and only in Live mode. Type to search your Home Assistant entities; each field lists only the matching kind."),OPT&&Object.keys(OPT.errors).length?h("p",{class:"small warn"},"Some lookups failed, so those fields are plain text: "+Object.entries(OPT.errors).map(([k,v])=>k+" ("+v+")").join("; ")):null,
   h("div",{class:"grid"},mk(e,"occupancy_sensor","Zone occupancy sensor",null,"binary_sensor"),mk(e,"gps_zone","Zone entity (for tracker in_zones)",null,"zone"),
    mk(e,"ha_latch_vehicle","Existing latch: vehicle (input_select)",null,"input_select"),mk(e,"ha_latch_source","Existing latch: source (input_select)",null,"input_select"),mk(e,"ha_latch_at","Existing latch: time (input_datetime)",null,"input_datetime"),
-   mk(e,"charger_status","Charger status sensor",null,"sensor"),mk(e,"charger_energy","Charger session energy sensor",null,"sensor"),mk(e,"charger_availability","Charger Availability switch (phase 4)",null,"switch"),mk(e,"charger_charge_control","Charger Charge Control switch (phase 4)",null,"switch")),
+   mk(e,"charger_status","Charger status sensor",null,"sensor"),mk(e,"charger_energy","Charger session energy sensor",null,"sensor"),mk(e,"charger_availability","Charger Availability switch",null,"switch"),mk(e,"charger_charge_control","Charger Charge Control switch (not used)",null,"switch")),
   h("button",{on:{click:()=>save("entities",e)}},"Save entities"))]};
 
 V.cars=()=>{const cars=DRAFT.cars||(DRAFT.cars=CFG.cars.map(c=>({...c,plate_patterns:c.plate_patterns.join(", ")})));
@@ -99,10 +115,10 @@ V.users=()=>{const us=DRAFT.users||(DRAFT.users=CFG.users.map(u=>({...u})));
  return[h("p",{class:"mut"},"A scan from a phone that is not listed (or not allowed) authorises nothing and notifies the first user with a notify target."),...out,h("div",{class:"row"},h("button",{class:"sec",on:{click:()=>{us.push({name:"",phone_device_id:"",notify_target:"",default_car:"",platform:"ios",allowed:true});render()}}},"Add user"),h("button",{on:{click:()=>save("users",us)}},"Save users"))]};
 
 V.tiers=()=>{const s=JSON.parse(JSON.stringify(CFG.sources)),p={...CFG.policy},c={...CFG.colours};
- const cols=[["over_empty","over none"],["over_unknown","over Unknown"],["over_known_fresh","over fresh car"],["over_known_stale","over stale car"],["refresh_same","refreshes same car"],["authorises","counts as valid latch (may charge)"]];
+ const cols=[["over_empty","over none"],["over_unknown","over Unknown"],["over_known_fresh","over fresh car"],["over_known_stale","over stale car"],["refresh_same","refreshes same car"],["authorises","authorises charging (turns Availability on)"]];
  const rows=Object.keys(s).map(k=>h("tr",{},h("td",{},h("b",{},k)),h("td",{},SEL(s[k].tier,[["confident","confident"],["non_confident","non-confident"]],v=>s[k].tier=v)),h("td",{},N(s[k].min_score,v=>s[k].min_score=v,"0.05")),
   cols.map(([f])=>h("td",{},k==="classifier"&&f==="authorises"?h("span",{class:"mut small"},"never"):h("input",{type:"checkbox",checked:s[k][f],on:{change:e=>s[k][f]=e.target.checked}})))));
- const tim=[["stale_after_s","A latch is stale after (s)"],["empty_clear_s","Zone empty clears after (s)"],["gps_leave_clear_s","Tracker away from home clears after (s)"],["default_timeout_s","Picker unanswered → default car (s, phase 4)"],["no_plugin_s","No plug-in → Availability off (s, phase 4)"],["restart_grace_s","Settle time after a restart or lost sensor, before the clear time applies (s)"],["shadow_settle_s","Shadow compare delay (s)"],["watchdog_timeout_s","Watchdog: silence before Availability off (s)"]];
+ const tim=[["stale_after_s","A latch is stale after (s)"],["empty_clear_s","Zone empty clears after (s)"],["gps_leave_clear_s","Tracker away from home clears after (s)"],["default_timeout_s","Picker unanswered → default car (s)"],["no_plugin_s","Plug-in window after a scan, without a latch (s)"],["restart_grace_s","Settle time after a restart or lost sensor, before the clear time applies (s)"],["shadow_settle_s","Shadow compare delay (s)"],["watchdog_timeout_s","Watchdog: silence before Availability off (s)"]];
  return[h("div",{class:"card scroll"},h("h2",{},"Sources"),h("p",{class:"mut small"},"Defaults reproduce today's behaviour. An Unknown read can only ever fill an empty latch, and the classifier can never authorise; neither is configurable."),
   h("table",{},h("thead",{},h("tr",{},h("th",{},"Source"),h("th",{},"Tier"),h("th",{},"Min score"),cols.map(([,l])=>h("th",{},l)))),h("tbody",{},rows)),
   h("button",{style:"margin-top:8px",on:{click:()=>save("sources",s)}},"Save sources")),
@@ -111,8 +127,8 @@ V.tiers=()=>{const s=JSON.parse(JSON.stringify(CFG.sources)),p={...CFG.policy},c
 
 V.sessions=async()=>{const d=await api("GET","sessions");
  const nf=DRAFT.nf||(DRAFT.nf={car_id:CFG.cars[0]?.id||"",kwh:"",note:"",start:null,end:null});
- return[h("div",{class:"card pick"},h("h2",{},"Which car? (picker)"),h("div",{class:"mut small"},d.open?`Open session since ${fmt(d.open.start)}`:"Allocates the latest session. Does not touch the charger."),
-   CFG.cars.map(c=>h("button",{on:{click:async()=>{try{await api("POST","pick",{car_id:c.id});flash("Allocated to "+c.name)}catch(e){flash(null,e.message)}}}},c.name))),
+ return[h("div",{class:"card pick"},h("h2",{},"Which car? (picker)"),h("div",{class:"mut small"},S.charging.pending?`Answers ${S.charging.pending.user}'s scan.`:d.open?`Open session since ${fmt(d.open.start)}`:"Allocates the latest session. Does not touch the charger."),
+   CFG.cars.map(c=>h("button",{on:{click:async()=>{try{const r=await api("POST","pick",{car_id:c.id});flash(r.scan?"Scan answered: "+c.name:"Allocated to "+c.name)}catch(e){flash(null,e.message)}}}},c.name))),
   h("div",{class:"card scroll"},h("h2",{},"Ledger (kWh)"),h("table",{},h("thead",{},h("tr",{},["Car","Opening","Sessions","Total"].map(x=>h("th",{},x)))),h("tbody",{},d.ledger.map(r=>h("tr",{},h("td",{},r.name),h("td",{},r.opening_kwh),h("td",{},r.session_kwh),h("td",{},h("b",{},r.total_kwh))))))),
   h("div",{class:"card scroll"},h("h2",{},"Sessions"),h("table",{},h("thead",{},h("tr",{},["Start","End","kWh","Car","Source","Note",""].map(x=>h("th",{},x)))),h("tbody",{},d.sessions.map(s=>h("tr",{},h("td",{},DT(s.start,async v=>{try{await api("PATCH","sessions/"+s.id,{start:v});flash("Saved.")}catch(x){flash(null,x.message)}})),h("td",{},s.end?DT(s.end,async v=>{try{await api("PATCH","sessions/"+s.id,{end:v});flash("Saved.")}catch(x){flash(null,x.message)}}):h("span",{class:"pill warn"},"open")),
     h("td",{},h("input",{type:"number",step:"any",value:s.kwh??"",style:"width:90px",on:{change:async e=>{try{await api("PATCH","sessions/"+s.id,{kwh:e.target.value});flash("Saved.")}catch(x){flash(null,x.message)}}}})),
@@ -134,8 +150,10 @@ V.shadow=async()=>{const d=await api("GET","disagreements");
 V.log=async()=>{const d=await api("GET","events?limit=200");
  return[h("div",{class:"card scroll"},h("h2",{},"Decision log"),h("table",{},h("thead",{},h("tr",{},["Time","Signal","Action","Car","Source","Rule","Reason"].map(x=>h("th",{},x)))),h("tbody",{},d.events.map(e=>h("tr",{},h("td",{class:"small"},fmt(e.ts)),h("td",{},e.signal),h("td",{},h("b",{class:e.action==="set"?"ok":e.action==="clear"?"warn":""},e.action)),h("td",{},e.car?carName(e.car):""),h("td",{},e.source||""),h("td",{class:"small"},e.rule),h("td",{class:"small"},e.reason))))))]};
 
-V.settings=()=>{const m={...CFG.mqtt},sh={...CFG.shadow};let lvl=CFG.log_level;
- return[h("div",{class:"card"},h("h2",{},"General"),h("div",{class:"grid"},F("Log level",SEL(lvl,["debug","info","warning","error"].map(x=>[x,x]),v=>lvl=v)),C(sh.enabled,v=>sh.enabled=v,"Shadow comparison enabled")),
+V.settings=()=>{const m={...CFG.mqtt},sh={...CFG.shadow},ct={...CFG.control};let lvl=CFG.log_level;
+ return[h("div",{class:"card"},h("h2",{},"Charging control"),h("p",{class:"mut small"},"The mode is chosen on the Status page."),h("div",{class:"grid"},F("Charger NFC tag",P(ct.tag_id,v=>ct.tag_id=v,"tags")),F("Watchdog automation (turns Availability off if the app goes quiet)",P(ct.watchdog_automation,v=>ct.watchdog_automation=v,"automation"))),
+  h("button",{style:"margin-top:8px",on:{click:()=>save("control",{tag_id:ct.tag_id,watchdog_automation:ct.watchdog_automation})}},"Save charging control")),
+ h("div",{class:"card"},h("h2",{},"General"),h("div",{class:"grid"},F("Log level",SEL(lvl,["debug","info","warning","error"].map(x=>[x,x]),v=>lvl=v)),C(sh.enabled,v=>sh.enabled=v,"Shadow comparison enabled")),
   h("button",{style:"margin-top:8px",on:{click:async()=>{try{CFG=await api("PUT","settings",{...CFG,log_level:lvl,shadow:sh});flash("Saved. (A log level change applies after the app restarts.)")}catch(e){flash(null,e.message)}}}},"Save")),
  h("div",{class:"card"},h("h2",{},"MQTT broker override"),h("p",{class:"mut small"},"Leave blank to use the broker Home Assistant provides."),h("div",{class:"grid"},F("Host",T(m.host,v=>m.host=v)),F("Port",N(m.port,v=>m.port=v,"1")),F("Username",T(m.username,v=>m.username=v)),F("Password",h("input",{type:"password",value:m.password,on:{input:e=>m.password=e.target.value}}))),h("button",{style:"margin-top:8px",on:{click:()=>save("mqtt",m)}},"Save MQTT")),
  h("div",{class:"card"},h("h2",{},"Export / import"),h("p",{class:"mut small"},"The export leaves out the MQTT password."),
@@ -144,12 +162,12 @@ V.settings=()=>{const m={...CFG.mqtt},sh={...CFG.shadow};let lvl=CFG.log_level;
 
 async function render(){const page=(location.hash||"#status").slice(1);const v=V[page]||V.status;
  $("#nav").replaceChildren(...PAGES.map(([k,l])=>h("a",{href:"#"+k,class:k===page?"on":""},l)));
- try{S=await api("GET","state");CFG=CFG||await api("GET","settings");$("#mode").textContent=S.dev?"dev":"shadow mode";
+ try{S=await api("GET","state");CFG=CFG||await api("GET","settings");$("#mode").textContent=(S.dev?"dev · ":"")+{off:"shadow only",dry_run:"dry run",live:"live"}[S.charging.mode];
   const body=await v();const app=$("#app");const sc=window.scrollY;
   app.replaceChildren(...(MSG?[h("div",{class:"msg"},MSG)]:[]),...(ERR?[h("div",{class:"err"},ERR)]:[]),...[].concat(body).filter(Boolean));MSG=ERR=null;window.scrollTo(0,sc)}
  catch(e){$("#app").replaceChildren(h("div",{class:"err"},"Could not load: "+e.message))}}
 async function loadOptions(){try{OPT=await api("GET","options");buildLists()}catch(e){}}
-window.addEventListener("hashchange",()=>{MSG=ERR=null;DRAFT={};if(["entities","cars","users"].includes(location.hash.slice(1)))loadOptions();render()});
+window.addEventListener("hashchange",()=>{MSG=ERR=null;DRAFT={};if(["entities","cars","users","settings"].includes(location.hash.slice(1)))loadOptions();render()});
 loadOptions().then(render);
 // live pages refresh themselves; form pages do not, so typing is never lost
 TIMER=setInterval(()=>{if(["status","log","shadow"].includes((location.hash||"#status").slice(1))&&!document.activeElement.matches("input,select,textarea"))render()},5000);

@@ -1,4 +1,4 @@
-"""MQTT input: subscribes to the Frigate events topic. Receive only; it publishes nothing."""
+"""MQTT: subscribes to the Frigate events topic, and publishes only the app's heartbeat."""
 from __future__ import annotations
 
 import logging
@@ -36,8 +36,20 @@ class MqttIn:
         self.on_payload = on_payload              # (bytes) -> None
         self.on_stats = on_stats                  # (bytes) -> None, Frigate's stats topic (camera names)
         self.status = "starting"
+        self.generation = 0                       # counts successful connections
         self._client = None
         self._lock = threading.Lock()
+
+    @property
+    def connected(self) -> bool:
+        c = self._client
+        return bool(c and c.is_connected())
+
+    def publish(self, topic: str, payload: str, retain: bool = False) -> bool:
+        c = self._client
+        if not c or not c.is_connected():
+            return False
+        return c.publish(topic, payload, retain=retain).rc == 0
 
     def start(self):
         threading.Thread(target=self.restart, name="mqtt-start", daemon=True).start()
@@ -75,6 +87,7 @@ class MqttIn:
                     client.subscribe(topic)
                     if self.on_stats:
                         client.subscribe(stats_topic)
+                    self.generation += 1
                     self.status = f"connected, listening on {topic}"
                 else:
                     self.status = f"broker refused the connection ({rc})"

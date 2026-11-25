@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, asdict
 UNKNOWN_ID = "unknown"
 UNKNOWN_NAME = "Unknown"
 SOURCES = ("lpr", "gps", "classifier", "nfc", "prompt", "default")
+SCAN_SOURCES = ("nfc", "prompt", "default")   # latches that only the scan flow makes
 TIERS = ("confident", "non_confident")
 
 
@@ -28,7 +29,7 @@ class User:
     notify_target: str = ""        # e.g. notify.mobile_app_<phone>
     default_car: str = ""          # car id
     allowed: bool = True
-    platform: str = "ios"          # ios | android (picker style, phase 4)
+    platform: str = "ios"          # ios | android (picker style)
 
 
 @dataclass
@@ -45,7 +46,7 @@ class Latch:
 
 @dataclass
 class Signal:
-    """One input to the engine. `kind` is lpr | classifier | gps | occupancy | scan | pick | tick."""
+    """One input to the engine. `kind` is lpr | classifier | gps | occupancy | charger."""
     kind: str
     ts: float
     data: dict = field(default_factory=dict)

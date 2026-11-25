@@ -6,7 +6,7 @@ from __future__ import annotations
 DOMAINS = {
     "binary_sensor": ("binary_sensor",), "zone": ("zone",), "input_select": ("input_select",),
     "input_datetime": ("input_datetime",), "sensor": ("sensor",), "switch": ("switch",),
-    "device_tracker": ("device_tracker",), "input_number": ("input_number",),
+    "device_tracker": ("device_tracker",), "input_number": ("input_number",), "automation": ("automation",),
 }
 
 DEV_ENTITIES = [
@@ -16,7 +16,7 @@ DEV_ENTITIES = [
     ("sensor.charger_energy_session", "Charger session energy"), ("switch.charger_availability", "Charger availability"),
     ("switch.charger_charge_control", "Charger charge control"),
     ("device_tracker.alpha_location", "Alpha location"), ("input_number.alpha_kwh", "Alpha kWh"),
-    ("light.kitchen", "Kitchen"),
+    ("automation.test_watchdog", "Test watchdog"), ("light.kitchen", "Kitchen"),
 ]
 
 
@@ -43,11 +43,18 @@ def devices_from_registry(raw: list[dict]) -> list[dict]:
     return sorted(out, key=lambda x: x["label"].lower())
 
 
+def tags_from_list(raw: list[dict]) -> list[dict]:
+    """HA tag list -> choices. `value` is the tag id carried by tag-scan events."""
+    out = [{"value": t.get("tag_id") or t.get("id"), "label": t.get("name") or t.get("tag_id") or t.get("id")}
+           for t in raw or []]
+    return sorted((t for t in out if t["value"]), key=lambda x: str(x["label"]).lower())
+
+
 def build(ha, seen: dict, dev: bool) -> dict:
     """Everything the panel's pickers need, in one response."""
     errors: dict[str, str] = {}
     ents: dict[str, list] = {k: [] for k in DOMAINS}
-    notify, devices = [], []
+    notify, devices, tags = [], [], []
     if dev and ha is None:
         for eid, name in DEV_ENTITIES:
             for k, doms in DOMAINS.items():
@@ -55,6 +62,7 @@ def build(ha, seen: dict, dev: bool) -> dict:
                     ents[k].append({"value": eid, "label": name})
         notify = [{"value": "notify.mobile_app_ann", "label": "mobile_app_ann"}]
         devices = [{"value": "dev_ann", "label": "Ann's phone (Apple iPhone)"}]
+        tags = [{"value": "test-tag", "label": "Test charger tag"}]
     elif ha is not None:
         try:
             for e in ha.list_entities():
@@ -72,7 +80,12 @@ def build(ha, seen: dict, dev: bool) -> dict:
             devices = devices_from_registry(ha.device_registry())
         except Exception as ex:      # noqa: BLE001
             errors["devices"] = str(ex)
+        try:
+            tags = tags_from_list(ha.tags())
+        except Exception as ex:      # noqa: BLE001
+            errors["tags"] = str(ex)
     else:
         errors["ha"] = "Home Assistant is not connected"
     frigate = {k: sorted(v) for k, v in seen.items()}
-    return {"entities": ents, "notify": notify, "devices": devices, "frigate": frigate, "errors": errors}
+    return {"entities": ents, "notify": notify, "devices": devices, "tags": tags, "frigate": frigate,
+            "errors": errors}
